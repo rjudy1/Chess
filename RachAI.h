@@ -39,6 +39,7 @@ private:
 	bool checkShift(const int& pos, const int& shift);
 	bool checkJump(const int& pos, const int& future);
 	void getShiftMoves(const unordered_map<int, rPiece>& map, vector<rMove>& moves, int pos, const int& shift);
+	int getPositionValue(int& pos, char&);
 	Move rMoveToMove(rMove&);
 	rMove MovetoRMove(Move&);
 
@@ -52,4 +53,11 @@ private:
 	char me;
 	char opp;
 	char turn;
+	int high;
+	vector<int> ePosValues;
+	vector<int> qPosValues;
+	vector<int> bPosValues;
+	vector<int> kPosValues;
+	vector<int> rPosValues;
+	vector<int> pPosValues;
 };

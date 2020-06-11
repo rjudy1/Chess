@@ -1,4 +1,5 @@
 /*
+
 Chess AI
 Author:		Rachael Judy
 Purpose:	Chess AI
@@ -8,11 +9,9 @@ Notes:
 	- coordinates are y, x start in lower left
 	- start NW and work way around clockwise for checking possible moves
 
-	- not using board total for anything right now
-	- caught in infinite loop in getstrength
-	- value method doesn't protect the king
-	- takes way too long to move, need to force king defense and cut recursion
 	- take position strength into account
+	- take number of moves opponent has into account - small factor - available/total possible * 2?
+	- tune the piece square tables
 
 Board:
 70 71 72 73
@@ -30,6 +29,7 @@ Board:
 	0 | 56 57 58 59 60 61 62 63 |
 		-  -  -  -  -  -  -  -
 		0  1  2  3  4  5  6  7
+
 */
 
 #include <cstdlib>
@@ -49,6 +49,7 @@ void RachAI::Init(bool isWhite) {
 	me = (isWhite ? 'w' : 'b'); // me is the AI
 	opp = (isWhite ? 'b' : 'w');
 	turn = me;
+	high = (int)isWhite - (int)!isWhite;
 
 	pieces = {
 		{4,  rPiece{ 'b', 'e', RVALUES::KING,   true }},
@@ -85,6 +86,67 @@ void RachAI::Init(bool isWhite) {
 		{54, rPiece{ 'w', 'p', RVALUES::PAWN,   true }},
 		{55, rPiece{ 'w', 'p', RVALUES::PAWN,   true }}
 	};
+
+	ePosValues = {
+		-30, -40, -40, -50, -50, -40, -40, -30,
+		-30, -40, -40, -50, -50, -40, -40, -30,
+		-30, -40, -40, -50, -50, -40, -40, -30,
+		-30, -40, -40, -50, -50, -40, -40, -30,
+		-20, -30, -30, -40, -40, -30, -30, -20,
+		-10, -20, -20, -20, -20, -20, -20, -10,
+		 20,  20,   0,   0,   0,   0,  20,  20,
+	     20,  30,  10,   0,   0,  10,  30,  20
+	}; // array of 64 values
+	qPosValues = {
+		 20, 35, 35, 40, 40, 35, 35, 20,
+		 20, 35, 35, 50, 50, 35, 35, 20,
+		 10, 15, 25, 50, 50, 25, 15, 10,
+		-10,  5,  5, 10, 10,  5,  5,-10,
+		-10,  0, 10, 10, 10, 10,  0,-10,
+		-20,-35,-35,-50,-50,-35,-35,-20,
+		-10,-15,-25,-50,-50,-25,-15,-10,
+		-20,-35,-35,-40,-40,-35,-35,-20,
+	};
+	bPosValues = {
+		-20,-10,-10,-10,-10,-10,-10,-20,
+		-10,  0,  0,  0,  0,  0,  0,-10,
+		-10,  0,  5, 10, 10,  5,  0,-10,
+		-10,  5,  5, 10, 10,  5,  5,-10,
+		-10,  0, 10, 10, 10, 10,  0,-10,
+		-10, 10, 10, 10, 10, 10, 10,-10,
+		-10,  5,  0,  0,  0,  0,  5,-10,
+		-20,-10,-40,-10,-10,-40,-10,-20,
+	};
+	kPosValues = {
+		 -50,-40,-30,-30,-30,-30,-40,-50,
+		 -40,-20,  0,  0,  0,  0,-20,-40,
+		 -30,  0, 10, 15, 15, 10,  0,-30,
+		 -30,  5, 15, 20, 20, 15,  5,-30,
+		 -30,  0, 15, 20, 20, 15,  0,-30,
+		 -30,  5, 10, 15, 15, 10,  5,-30,
+		 -40,-20,  0,  5,  5,  0,-20,-40,
+		 -50,-40,-20,-30,-30,-20,-40,-50,
+	};
+	rPosValues = {
+		-20,-10,-10,-10,-10,-10,-10,-20,
+		-10,  0,  0,  0,  0,  0,  0,-10,
+		-10,  0,  5, 10, 10,  5,  0,-10,
+		-10,  5,  5, 10, 10,  5,  5,-10,
+		-10,  0, 10, 10, 10, 10,  0,-10,
+		-10, 10, 10, 10, 10, 10, 10,-10,
+		-10,  5,  0,  0,  0,  0,  5,-10,
+		-20,-10,-40,-10,-10,-40,-10,-20,
+	};
+	pPosValues = {
+		15, 20, 20, 20, 20, 20, 20, 15,
+		50, 50, 50, 50, 50, 50, 50, 50,
+		10, 10, 20, 30, 30, 20, 10, 10,
+	    05, 05, 10, 27, 27, 10, 05, 05,
+		00, 00, 00, 25, 25, 00, 00, 00,
+		05, -5,-10, 00, 00,-10, -5, 05,
+		05, 10, 10,-25,-25, 10, 10, 5,
+	   -15,-20,-20,-20,-20,-20,-20,-15
+	};
 }
 
 // return a calculated Move to the game
@@ -108,8 +170,9 @@ Move RachAI::GetMove(Move opMove) {
 	vector<rMove> moves = getAvailableMoves(pieces); // the AI's available moves
 	int strength = 0;
 	int currentStrength = 0;
-	int depth = 1; // 4 should allow for depth 3 (2^(n-1))
+	int depth = 4; // 4 should allow for depth 3 (2^(n-1))
 	unordered_map<int, rPiece> map;
+	r = moves.at(1);
 	for (auto move : moves) { // iterates through the available moves, testing execution on pieces
 		map = pieces;
 		map = executeMove(move, map); // execute on temporary map
@@ -172,25 +235,36 @@ int RachAI::getMoveStrength(int depth, vector<rMove> moves, unordered_map<int, r
 	// looking at enemy's moves
 	unordered_map<int, rPiece> enemyMap; // working map for opponent
 	unordered_map<int, rPiece> myMap; // working map for AI
+	vector<rMove> mmoves;
+	vector<rMove> nmoves;
 	for (auto move : moves) { // go through full map of moves passed down
 		enemyMap = thisMap;
 		if (enemyMap.count(move.position))
 			value -= enemyMap.at(move.position).value * depth; // potential losses 
+		value -= ((getPositionValue(move.position, enemyMap.at(move.org).type) 
+			- getPositionValue(move.org, enemyMap.at(move.org).type) * depth));
 		enemyMap = executeMove(move, enemyMap);
 		turn = me; // get the AIs possible follow up moves
-		moves = getAvailableMoves(enemyMap);
+		mmoves = getAvailableMoves(enemyMap);
+
+		if (boardTotal(enemyMap) < -500) {
+			value -= 20 * depth;
+			continue;
+		}
 
 		// look at my next moves
-		for (auto move : moves) {
+		for (auto mmove : mmoves) {
 			myMap = enemyMap; // reset map after every iteration forward
-			if (myMap.count(move.position)) // capture available
-				value += myMap.at(move.position).value * depth;
-			myMap = executeMove(move, myMap);
+			if (myMap.count(mmove.position)) // capture available
+				value += myMap.at(mmove.position).value * depth;
+			value += (getPositionValue(move.position, myMap.at(mmove.org).type)
+				- getPositionValue(move.org, myMap.at(mmove.org).type) * depth);
+			myMap = executeMove(mmove, myMap);
 			turn = opp; // get possible opponents moves
-			moves = getAvailableMoves(myMap);
+			nmoves = getAvailableMoves(myMap);
 
-			if (depth != 0)
-				value += getMoveStrength(depth, moves, myMap);
+			if (depth != 1)
+				value += getMoveStrength(depth, nmoves, myMap);
 		}
 	}
 	return value;
@@ -323,6 +397,24 @@ bool RachAI::inCastlingDanger(const unordered_map<int, rPiece>& map, const int& 
 	}
 	toggleTurn(); // return turn back to current player
 	return false;
+}
+
+int RachAI::getPositionValue(int& pos, char& piece) {
+	switch (piece) {
+	case 'e':
+		return ePosValues.at(pos); // multiply by direction or player?
+	case 'q':
+		return qPosValues.at(pos);
+	case 'b':
+		return bPosValues.at(pos);
+	case 'k':
+		return kPosValues.at(pos);
+	case 'r':
+		return rPosValues.at(pos);
+	case 'p':
+		return pPosValues.at(pos);
+	}
+
 }
 
 // check edges for shifts
