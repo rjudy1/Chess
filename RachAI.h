@@ -27,7 +27,7 @@ class RachAI : Player {
 public:
 	void Init(bool color) override;
 	Move GetMove(Move lastMove) override;
-	unordered_map<int, rPiece>& executeMove(const rMove& m, unordered_map<int, rPiece>&, bool real = false);
+	void executeMove(const rMove& m, unordered_map<int, rPiece>&, queue<rRestorePoint>& qR, bool real = false);
 
 private:
 	int getMoveStrength(int, vector<rMove>, unordered_map<int, rPiece>);

@@ -5,13 +5,16 @@ Author:		Rachael Judy
 Purpose:	Chess AI
 Date:		5/16/2020
 Notes:
-	- Board 1-64
+	- Board 0-63
 	- coordinates are y, x start in lower left
 	- start NW and work way around clockwise for checking possible moves
 
-	- take position strength into account
-	- take number of moves opponent has into account - small factor - available/total possible * 2?
+	- take number of moves opponent has into account - small factor - available/total possible * 2??
 	- tune the piece square tables
+	- not protecting king, values too high??
+	- value compounding is out of control
+	- need to increase depth to >=50 to make next move most significant
+	- push the item removed onto a queue and push it back into map after that section is complete?
 
 Board:
 70 71 72 73
@@ -88,64 +91,65 @@ void RachAI::Init(bool isWhite) {
 	};
 
 	ePosValues = {
-		-30, -40, -40, -50, -50, -40, -40, -30,
-		-30, -40, -40, -50, -50, -40, -40, -30,
-		-30, -40, -40, -50, -50, -40, -40, -30,
-		-30, -40, -40, -50, -50, -40, -40, -30,
-		-20, -30, -30, -40, -40, -30, -30, -20,
-		-10, -20, -20, -20, -20, -20, -20, -10,
-		 20,  20,   0,   0,   0,   0,  20,  20,
-	     20,  30,  10,   0,   0,  10,  30,  20
+		-3, -4, -4, -5, -5, -4, -4, -3,
+		-3, -4, -4, -5, -5, -4, -4, -3,
+		-3, -4, -4, -5, -5, -4, -4, -3,
+		-3, -4, -4, -5, -5, -4, -4, -3,
+		-2, -3, -3, -4, -4, -3, -3, -2,
+		-1, -2, -2, -2, -2, -2, -2, -2,
+		 2,  2,  0,  0,  0,  0,  2,  2,
+		 2,  3,  1,  0,  0,  1,  3,  2
 	}; // array of 64 values
 	qPosValues = {
-		 20, 35, 35, 40, 40, 35, 35, 20,
-		 20, 35, 35, 50, 50, 35, 35, 20,
-		 10, 15, 25, 50, 50, 25, 15, 10,
-		-10,  5,  5, 10, 10,  5,  5,-10,
-		-10,  0, 10, 10, 10, 10,  0,-10,
-		-20,-35,-35,-50,-50,-35,-35,-20,
-		-10,-15,-25,-50,-50,-25,-15,-10,
-		-20,-35,-35,-40,-40,-35,-35,-20,
+		-3, -2, -2, -1, -1, -2, -2, -3,
+		-2,  0,  0,  0,  0,  0,  0, -2,
+		-2,  0,  1,  1,  1,  1,  0, -2,
+		-1,  0,  1,  1,  1,  1,  0, -1,
+		 0,  0,  1,  1,  1,  1,  0,  0,
+		-2,  1,  1,  1,  1,  1,  0, -2,
+		-2,  0,  1,  0,  0,  0,  0, -2,
+		-3, -2, -2, -1, -1, -2, -2, -3
 	};
 	bPosValues = {
-		-20,-10,-10,-10,-10,-10,-10,-20,
-		-10,  0,  0,  0,  0,  0,  0,-10,
-		-10,  0,  5, 10, 10,  5,  0,-10,
-		-10,  5,  5, 10, 10,  5,  5,-10,
-		-10,  0, 10, 10, 10, 10,  0,-10,
-		-10, 10, 10, 10, 10, 10, 10,-10,
-		-10,  5,  0,  0,  0,  0,  5,-10,
-		-20,-10,-40,-10,-10,-40,-10,-20,
+		-3, -2, -2, -1, -1, -2, -2, -3,
+		-2,  0,  0,  0,  0,  0,  0, -2,
+		-2,  0,  1,  2,  2,  1,  0, -2,
+		-2,  1,  1,  2,  2,  1,  0, -2,
+		-2,  0,  2,  2,  2,  2,  0, -2,
+		-2,  2,  2,  2,  2,  2,  2, -2,
+		-2,  1,  1,  0,  0,  0,  1, -2,
+		-3, -2, -2, -2, -2, -2, -2, -3
 	};
 	kPosValues = {
-		 -50,-40,-30,-30,-30,-30,-40,-50,
-		 -40,-20,  0,  0,  0,  0,-20,-40,
-		 -30,  0, 10, 15, 15, 10,  0,-30,
-		 -30,  5, 15, 20, 20, 15,  5,-30,
-		 -30,  0, 15, 20, 20, 15,  0,-30,
-		 -30,  5, 10, 15, 15, 10,  5,-30,
-		 -40,-20,  0,  5,  5,  0,-20,-40,
-		 -50,-40,-20,-30,-30,-20,-40,-50,
+		 -5, -4, -3, -3, -3, -3, -4, -5,
+		 -4, -2,  0,  0,  0,  0, -2, -4,
+		 -3,  0,  1,  2,  2,  1,  0, -3,
+		 -3,  1,  2,  2,  2,  2,  1, -3,
+		 -3,  0,  1,  2,  2,  1,  0, -3,
+		 -3,  1,  1,  2,  2,  1,  1, -3,
+		 -4, -2,  0,  1,  1,  0, -2  -4,
+		 -5, -4, -3, -3, -3, -3, -4, -5
 	};
 	rPosValues = {
-		-20,-10,-10,-10,-10,-10,-10,-20,
-		-10,  0,  0,  0,  0,  0,  0,-10,
-		-10,  0,  5, 10, 10,  5,  0,-10,
-		-10,  5,  5, 10, 10,  5,  5,-10,
-		-10,  0, 10, 10, 10, 10,  0,-10,
-		-10, 10, 10, 10, 10, 10, 10,-10,
-		-10,  5,  0,  0,  0,  0,  5,-10,
-		-20,-10,-40,-10,-10,-40,-10,-20,
+		  0,  0,  0,  0,  0,  0,  0,  0,
+		  1,  1,  1,  1,  1,  1,  1,  1,
+		 -1,  0,  0,  0,  0,  0,  0, -1,
+		 -1,  0,  0,  0,  0,  0,  0, -1,
+		 -1,  0,  0,  0,  0,  0,  0, -1,
+		 -1,  0,  0,  0,  0,  0,  0, -1,
+		 -1,  0,  0,  0,  0,  0,  0, -1,
+		  0,  0,  0,  1,  1,  0,  0,  0
+
 	};
 	pPosValues = {
-		15, 20, 20, 20, 20, 20, 20, 15,
-		50, 50, 50, 50, 50, 50, 50, 50,
-		10, 10, 20, 30, 30, 20, 10, 10,
-	    05, 05, 10, 27, 27, 10, 05, 05,
-		00, 00, 00, 25, 25, 00, 00, 00,
-		05, -5,-10, 00, 00,-10, -5, 05,
-		05, 10, 10,-25,-25, 10, 10, 5,
-	   -15,-20,-20,-20,-20,-20,-20,-15
+		  2,  2,  2,  2,  2,  2,  2,  2,
+		  5,  5,  5,  5,  5,  5,  5,  5,
+		  1,  1,  2,  3,  3,  2,  1,  1,
+		  1,  1,  1,  3,  3,  1,  1,  1,
+		  0,  0,  0,  2,  2,  0,  0,  0,
+		  1, -1, -1,  0,  0, -1, -1,  1,
+		  1,  1,  1, -2, -2,  1,  1,  1,
+		 -1, -1, -1, -1, -1, -1, -1, -1
 	};
 }
 
@@ -161,41 +165,64 @@ Move RachAI::GetMove(Move opMove) {
 		pawnSpecialOff.pop();
 	}
 
+	queue<rRestorePoint> q = {};
+
 	// add players move to the configuration
 	if (r.org != r.position)
-		executeMove(r, pieces, true);
+		executeMove(r, pieces, q, true);
 
 	// find best move based on recursive depth
 	turn = me;
 	vector<rMove> moves = getAvailableMoves(pieces); // the AI's available moves
 	int strength = 0;
-	int currentStrength = 0;
-	int depth = 4; // 4 should allow for depth 3 (2^(n-1))
-	unordered_map<int, rPiece> map;
-	r = moves.at(1);
+	int currentStrength = -5000;
+	int depth = 50; // 50 should allow for depth 2
+	unordered_map<int, rPiece> map = pieces;
+	r = moves.at(0);
+	queue<rRestorePoint> mainQ;
 	for (auto move : moves) { // iterates through the available moves, testing execution on pieces
-		map = pieces;
-		map = executeMove(move, map); // execute on temporary map
+		while (!mainQ.empty()) {
+			mainQ.front().restore(map);
+			mainQ.pop();
+		}
+		strength = 0;
+//		map = pieces; // restore point
+		if (map.count(move.position))
+			strength += map.at(move.position).value * depth; // potential losses 
+		strength += (getPositionValue(move.position, map.at(move.org).type)
+			- getPositionValue(move.org, map.at(move.org).type) * high * depth);
+		executeMove(move, map, mainQ); // execute on temporary map?
 		turn = opp; // set to non AI's turn to get the available moves
-		strength = getMoveStrength(depth, getAvailableMoves(map), map);
-		if (strength >= currentStrength) // chooses move with max strength
+		strength += getMoveStrength(depth, getAvailableMoves(map), map);
+		if (strength >= currentStrength) {// chooses move with max strength
+			currentStrength = strength;
 			r = move;
+		}
 	}
 
 	// convert rMove to Move
 	Move myMove = rMoveToMove(r);
-	executeMove(r, pieces, true);
+	executeMove(r, pieces, q, true);
 
 	//	return Move // Move of choice or default
 	return myMove;
 }
 
 // register the move on my piece enemyMap
-unordered_map<int, rPiece>& RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, bool real) {
+void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<rRestorePoint>& qR, bool real) {
 	int shift = -2 * m.note + 5; // -1 for 2, 1 for 3
+
+	// add the piece we just moved back in
+	qR.push(rRestorePoint(map.at(m.org), m.org, true)); // readd the original
+
 	// take move and conditions into consideration
 	switch (m.note) {
-	case 0: // inefficient? maybe
+	case 0:
+		if (map.count(m.position)) // if there's a capture
+			qR.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
+		else
+			qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new piece
+
 		map[m.position] = map.at(m.org); // replace or create
 		if (map[m.position].type == 'r' || map[m.position].type == 'e')
 			map[m.position].special = false;
@@ -203,11 +230,21 @@ unordered_map<int, rPiece>& RachAI::executeMove(const rMove& m, unordered_map<in
 			pawnSpecialOff.push(m.position);
 		break;
 	case 1:
+		qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new
+
 		map[m.position] = map.at(m.org);
+
+		qR.push(rRestorePoint(map.at(m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1)),
+			m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1), true)); // restore the captured
+
 		map.erase(m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1)); // erase captured
 		break;
 	case 2:
 	case 3:
+		qR.push(rRestorePoint(map.at(m.org), (m.position), false)); // remove the new king
+		qR.push(rRestorePoint(map.at(m.position + (m.note * 3 - 8)), m.position + shift, false));
+		qR.push(rRestorePoint(map.at(m.position + (m.note * 3 - 8)), m.position + (m.note * 3 - 8), true)); // re add original rook
+
 		map[m.org].special = false; // end king speciality
 		map[m.position] = map[m.org];
 		map[m.position + shift] = map[m.position + (m.note * 3 - 8)];
@@ -215,13 +252,17 @@ unordered_map<int, rPiece>& RachAI::executeMove(const rMove& m, unordered_map<in
 		map.erase(m.position + (m.note * 3 - 8));
 		break;
 	case 4:
+		if (map.count(m.position)) // if there's a capture
+			qR.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
+		else
+			qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new queen
+
 		map[m.position] = map.at(m.org);
 		map[m.position].type = 'q';
 		map[m.position].value = RVALUES::QUEEN;
 		break;
 	}
 	map.erase(m.org); // erase original
-	return map;
 }
 
 
@@ -231,35 +272,45 @@ unordered_map<int, rPiece>& RachAI::executeMove(const rMove& m, unordered_map<in
 int RachAI::getMoveStrength(int depth, vector<rMove> moves, unordered_map<int, rPiece> thisMap) {
 	int value = 0; // value of the move
 	
-	depth /= 2; // gone a level of depth down and thus should do this iteration
+	depth /= 50; // gone a level of depth down and thus should do this iteration
 	// looking at enemy's moves
 	unordered_map<int, rPiece> enemyMap; // working map for opponent
 	unordered_map<int, rPiece> myMap; // working map for AI
 	vector<rMove> mmoves;
 	vector<rMove> nmoves;
+	queue<rRestorePoint> enemyQ;
+	queue<rRestorePoint> myQ;
 	for (auto move : moves) { // go through full map of moves passed down
-		enemyMap = thisMap;
+		while (!enemyQ.empty()) {
+			enemyQ.front().restore(enemyMap);
+			enemyQ.pop();
+		}
+//		enemyMap = thisMap;
 		if (enemyMap.count(move.position))
 			value -= enemyMap.at(move.position).value * depth; // potential losses 
 		value -= ((getPositionValue(move.position, enemyMap.at(move.org).type) 
-			- getPositionValue(move.org, enemyMap.at(move.org).type) * depth));
-		enemyMap = executeMove(move, enemyMap);
+			- getPositionValue(move.org, enemyMap.at(move.org).type) * high * depth));
+		executeMove(move, enemyMap, enemyQ);
 		turn = me; // get the AIs possible follow up moves
 		mmoves = getAvailableMoves(enemyMap);
 
 		if (boardTotal(enemyMap) < -500) {
-			value -= 20 * depth;
-			continue;
+			value -= 1000 * depth;
+			break;
 		}
 
 		// look at my next moves
 		for (auto mmove : mmoves) {
-			myMap = enemyMap; // reset map after every iteration forward
+			while (!myQ.empty()) {
+				myQ.front().restore(enemyMap);
+				myQ.pop();
+			}
+//			myMap = enemyMap; // reset map after every iteration forward
 			if (myMap.count(mmove.position)) // capture available
 				value += myMap.at(mmove.position).value * depth;
 			value += (getPositionValue(move.position, myMap.at(mmove.org).type)
-				- getPositionValue(move.org, myMap.at(mmove.org).type) * depth);
-			myMap = executeMove(mmove, myMap);
+				- getPositionValue(move.org, myMap.at(mmove.org).type) * high * depth);
+			executeMove(mmove, myMap, enemyQ);
 			turn = opp; // get possible opponents moves
 			nmoves = getAvailableMoves(myMap);
 

@@ -40,4 +40,26 @@ struct rMove {// place own piece as second if no capture, king as secondary on c
 	int note; // 0 for normal move/capture, 1 for en passant, 2 for queenside castle, 3 for kingside castle, 4 promote 
 };
 
+class rRestorePoint {
+public:
+	rRestorePoint(rPiece rP, int rPos, bool add) {
+		r = rP;
+		rPosition = rPos;
+		rAdd = add;
+	}
+	
+	void restore(unordered_map<int, rPiece>& map) {
+		if (rAdd) {
+			map[rPosition] = r;
+		}
+		else {
+			map.erase(rPosition);
+		}
+	}
+
+	rPiece r;
+	int rPosition;
+	bool rAdd;
+};
+
 #endif
