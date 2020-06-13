@@ -6,7 +6,7 @@ Date:		5/16/2020
 Notes:
 	- 
 	- 
-Updated:	5/29/2020
+Updated:	6/13/2020
 */
 
 #include <cstdlib>
@@ -30,11 +30,10 @@ public:
 	void executeMove(const rMove& m, unordered_map<int, rPiece>&, queue<rRestorePoint>& qR, bool real = false);
 
 private:
-	int getMoveStrength(int, vector<rMove>, unordered_map<int, rPiece>);
-	vector<rMove> getAvailableMoves(const unordered_map<int, rPiece>&, bool castleCheck = false);
+	int getMoveStrength(int, vector<rMove>&, unordered_map<int, rPiece>&);
+	vector<rMove>& getAvailableMoves(const unordered_map<int, rPiece>&, vector<rMove>&, bool castleCheck = false);
 
 	int boardTotal(const unordered_map<int, rPiece>& map);
-	void toggleTurn();
 	bool inCastlingDanger(const unordered_map<int, rPiece>& map, const int& side, const int& kingPos);
 	bool checkShift(const int& pos, const int& shift);
 	bool checkJump(const int& pos, const int& future);
@@ -54,6 +53,8 @@ private:
 	char opp;
 	char turn;
 	int high;
+
+	// for values of position
 	vector<int> ePosValues;
 	vector<int> qPosValues;
 	vector<int> bPosValues;

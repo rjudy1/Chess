@@ -1,20 +1,23 @@
 /*
-
 Chess AI
 Author:		Rachael Judy
 Purpose:	Chess AI
 Date:		5/16/2020
+Updated:	6/13/2020
 Notes:
 	- Board 0-63
 	- coordinates are y, x start in lower left
 	- start NW and work way around clockwise for checking possible moves
 
 	- take number of moves opponent has into account - small factor - available/total possible * 2??
-	- tune the piece square tables
-	- not protecting king, values too high??
-	- value compounding is out of control
-	- need to increase depth to >=50 to make next move most significant
-	- push the item removed onto a queue and push it back into map after that section is complete?
+	- increase depth?
+	- reduce duplication of map and move vector
+
+	- tune the piece square tables and weights
+	- still not protecting the king properly
+	- need to optimize/cut paths
+	- might be optimizing white only for now
+
 
 Board:
 70 71 72 73
@@ -37,10 +40,10 @@ Board:
 
 #include <cstdlib>
 #include <iostream>
-#include <string>
-#include <vector>
-#include <unordered_map>
 #include <queue>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "RachAI.h"
 
@@ -50,9 +53,8 @@ using namespace std;
 // sets initial positions
 void RachAI::Init(bool isWhite) {
 	me = (isWhite ? 'w' : 'b'); // me is the AI
-	opp = (isWhite ? 'b' : 'w');
-	turn = me;
-	high = (int)isWhite - (int)!isWhite;
+	opp = (isWhite ? 'b' : 'w'); // sets opponent and turn to me
+	high = (int)isWhite - (int)!isWhite; // white is +1
 
 	pieces = {
 		{4,  rPiece{ 'b', 'e', RVALUES::KING,   true }},
@@ -90,6 +92,7 @@ void RachAI::Init(bool isWhite) {
 		{55, rPiece{ 'w', 'p', RVALUES::PAWN,   true }}
 	};
 
+	// sets values for positions
 	ePosValues = {
 		-3, -4, -4, -5, -5, -4, -4, -3,
 		-3, -4, -4, -5, -5, -4, -4, -3,
@@ -127,7 +130,7 @@ void RachAI::Init(bool isWhite) {
 		 -3,  1,  2,  2,  2,  2,  1, -3,
 		 -3,  0,  1,  2,  2,  1,  0, -3,
 		 -3,  1,  1,  2,  2,  1,  1, -3,
-		 -4, -2,  0,  1,  1,  0, -2  -4,
+		 -4, -2,  0,  1,  1,  0, -2, -4,
 		 -5, -4, -3, -3, -3, -3, -4, -5
 	};
 	rPosValues = {
@@ -155,7 +158,7 @@ void RachAI::Init(bool isWhite) {
 
 // return a calculated Move to the game
 Move RachAI::GetMove(Move opMove) {
-	// convert to my move
+	// convert to rMove type
 	rMove r = MovetoRMove(opMove);
 
 	// turn off special for en passant, queued pawns
@@ -165,6 +168,7 @@ Move RachAI::GetMove(Move opMove) {
 		pawnSpecialOff.pop();
 	}
 
+	// will ignore this queue
 	queue<rRestorePoint> q = {};
 
 	// add players move to the configuration
@@ -173,30 +177,34 @@ Move RachAI::GetMove(Move opMove) {
 
 	// find best move based on recursive depth
 	turn = me;
-	vector<rMove> moves = getAvailableMoves(pieces); // the AI's available moves
+	vector<rMove> moves;
+	moves = getAvailableMoves(pieces, moves); // the AI's available moves
 	int strength = 0;
 	int currentStrength = -5000;
 	int depth = 50; // 50 should allow for depth 2
-	unordered_map<int, rPiece> map = pieces;
+	unordered_map<int, rPiece> map = pieces; /////////// do we need this duplicate, or could we restore it?
 	r = moves.at(0);
 	queue<rRestorePoint> mainQ;
 	for (auto move : moves) { // iterates through the available moves, testing execution on pieces
-		while (!mainQ.empty()) {
-			mainQ.front().restore(map);
-			mainQ.pop();
-		}
 		strength = 0;
-//		map = pieces; // restore point
-		if (map.count(move.position))
+		if (map.count(move.position)) // possible capture
 			strength += map.at(move.position).value * depth; // potential losses 
-		strength += (getPositionValue(move.position, map.at(move.org).type)
-			- getPositionValue(move.org, map.at(move.org).type) * high * depth);
+		strength += ((getPositionValue(move.position, map.at(move.org).type)
+			- getPositionValue(move.org, map.at(move.org).type)) * high * depth);
 		executeMove(move, map, mainQ); // execute on temporary map?
+
 		turn = opp; // set to non AI's turn to get the available moves
-		strength += getMoveStrength(depth, getAvailableMoves(map), map);
+		vector<rMove> eMoves = {};
+		strength += getMoveStrength(depth, getAvailableMoves(map, eMoves), map);
 		if (strength >= currentStrength) {// chooses move with max strength
 			currentStrength = strength;
 			r = move;
+		}
+
+		// restore map
+		while (!mainQ.empty()) {
+			mainQ.front().restore(map);
+			mainQ.pop();
 		}
 	}
 
@@ -208,7 +216,7 @@ Move RachAI::GetMove(Move opMove) {
 	return myMove;
 }
 
-// register the move on my piece enemyMap
+// register the move on the working piece map
 void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<rRestorePoint>& qR, bool real) {
 	int shift = -2 * m.note + 5; // -1 for 2, 1 for 3
 
@@ -269,53 +277,53 @@ void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<
 //////////////////////// Calculations ////////////////////////////
 
 // determine strength of particularly move based on board config/players
-int RachAI::getMoveStrength(int depth, vector<rMove> moves, unordered_map<int, rPiece> thisMap) {
+int RachAI::getMoveStrength(int depth, vector<rMove>& moves, unordered_map<int, rPiece>& thisMap) {
 	int value = 0; // value of the move
 	
 	depth /= 50; // gone a level of depth down and thus should do this iteration
 	// looking at enemy's moves
-	unordered_map<int, rPiece> enemyMap; // working map for opponent
-	unordered_map<int, rPiece> myMap; // working map for AI
-	vector<rMove> mmoves;
-	vector<rMove> nmoves;
+	unordered_map<int, rPiece> enemyMap = thisMap; // working map for opponent /////// do we need this duplicate?
+	vector<rMove> mmoves; // new moves for enemy
+	vector<rMove> nmoves; // new moves?????????????????????????
 	queue<rRestorePoint> enemyQ;
 	queue<rRestorePoint> myQ;
 	for (auto move : moves) { // go through full map of moves passed down
-		while (!enemyQ.empty()) {
-			enemyQ.front().restore(enemyMap);
-			enemyQ.pop();
-		}
-//		enemyMap = thisMap;
 		if (enemyMap.count(move.position))
 			value -= enemyMap.at(move.position).value * depth; // potential losses 
 		value -= ((getPositionValue(move.position, enemyMap.at(move.org).type) 
-			- getPositionValue(move.org, enemyMap.at(move.org).type) * high * depth));
+			- getPositionValue(move.org, enemyMap.at(move.org).type)) * high * depth);
 		executeMove(move, enemyMap, enemyQ);
-		turn = me; // get the AIs possible follow up moves
-		mmoves = getAvailableMoves(enemyMap);
 
-		if (boardTotal(enemyMap) < -500) {
-			value -= 1000 * depth;
+		turn = me; // get the AIs possible follow up moves
+		mmoves = getAvailableMoves(enemyMap, mmoves);
+
+		if (boardTotal(enemyMap) < -100) {
+			value -= 10000 * depth;
 			break;
 		}
 
 		// look at my next moves
 		for (auto mmove : mmoves) {
-			while (!myQ.empty()) {
+			if (enemyMap.count(mmove.position)) // capture available
+				value += enemyMap.at(mmove.position).value * depth;
+			value += ((getPositionValue(move.position, enemyMap.at(mmove.org).type)
+				- getPositionValue(move.org, enemyMap.at(mmove.org).type)) * high * depth);
+			executeMove(mmove, enemyMap, myQ);
+
+			turn = opp; // get possible opponents moves
+			nmoves = getAvailableMoves(enemyMap, nmoves);
+
+			if (depth > 1) // iterate on next move and countermove
+				value += getMoveStrength(depth, nmoves, enemyMap);
+			
+			while (!myQ.empty()) { // restore
 				myQ.front().restore(enemyMap);
 				myQ.pop();
 			}
-//			myMap = enemyMap; // reset map after every iteration forward
-			if (myMap.count(mmove.position)) // capture available
-				value += myMap.at(mmove.position).value * depth;
-			value += (getPositionValue(move.position, myMap.at(mmove.org).type)
-				- getPositionValue(move.org, myMap.at(mmove.org).type) * high * depth);
-			executeMove(mmove, myMap, enemyQ);
-			turn = opp; // get possible opponents moves
-			nmoves = getAvailableMoves(myMap);
-
-			if (depth != 1)
-				value += getMoveStrength(depth, nmoves, myMap);
+		}
+		while (!enemyQ.empty()) {
+			enemyQ.front().restore(enemyMap);
+			enemyQ.pop();
 		}
 	}
 	return value;
@@ -323,8 +331,8 @@ int RachAI::getMoveStrength(int depth, vector<rMove> moves, unordered_map<int, r
 }
 
 // gets a vector of possible moves
-vector<rMove> RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, bool castleCheck) {
-	vector<rMove> moves = {};
+vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, vector<rMove>& moves, bool castleCheck) {
+	moves = {};
 	for (auto p : map) {
 		if (p.second.color == turn) {
 			int pos = p.first;
@@ -427,33 +435,32 @@ vector<rMove> RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, b
 int RachAI::boardTotal(const unordered_map<int, rPiece>& map) {
 	int value = 0;
 	for (auto p : map) {
-		value += p.second.value;
+		if (p.second.color == me)
+			value += p.second.value;
+		else
+			value -= p.second.value;
 	}
 	return value;
-}
-
-// switches actual turn
-void RachAI::toggleTurn() { 
-	turn = ((turn == 'w') ? 'b' : 'w'); 
 }
 
 // check if the path of the king is threatened
 bool RachAI::inCastlingDanger(const unordered_map<int, rPiece>& map, const int& side, const int& kingPos) {
 	// check king square and square beside king
-	toggleTurn(); // set turn temporarily to other player
-	vector<rMove> dangers = getAvailableMoves(map, true); // this is an expensive choice
+	turn = opp; // set turn temporarily to other player
+	vector<rMove> dangers;
+	dangers = getAvailableMoves(map, dangers, true); // this is an expensive choice
 	for (auto d : dangers) {
 		if (d.position == kingPos || d.position == kingPos + (2 * side - 5))
 			return true;
 	}
-	toggleTurn(); // return turn back to current player
+	turn = me; // return turn back to current player
 	return false;
 }
 
 int RachAI::getPositionValue(int& pos, char& piece) {
 	switch (piece) {
 	case 'e':
-		return ePosValues.at(pos); // multiply by direction or player?
+		return ePosValues.at(pos);
 	case 'q':
 		return qPosValues.at(pos);
 	case 'b':

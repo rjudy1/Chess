@@ -13,7 +13,7 @@ enum RVALUES {
 	KNIGHT = 3, //maybe 4?
 	BISHOP = 3,
 	QUEEN = 9, // maybe 8 or 10?
-	KING = 1000
+	KING = 500
 };
 
 enum RSHIFT {

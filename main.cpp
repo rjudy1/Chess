@@ -127,6 +127,7 @@ void MyFrame::OnIdle(wxIdleEvent& event) {
         p1Turn = !p1Turn;
         wxWindow::Refresh();
     }
+
 }
 
 
