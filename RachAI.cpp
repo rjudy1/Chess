@@ -3,20 +3,18 @@ Chess AI
 Author:		Rachael Judy
 Purpose:	Chess AI
 Date:		5/16/2020
-Updated:	6/13/2020
+Updated:	6/20/2020
 Notes:
 	- Board 0-63
 	- coordinates are y, x start in lower left
 	- start NW and work way around clockwise for checking possible moves
 
-	- take number of moves opponent has into account - small factor - available/total possible * 2??
-	- increase depth?
-	- reduce duplication of map and move vector
-
+	- any more efficient structure for getmoves? - not critical
+	- could we do everything directly on piece map instead of copying - only one copy rn
 	- tune the piece square tables and weights
-	- still not protecting the king properly
-	- need to optimize/cut paths
-	- might be optimizing white only for now
+	- cut moves sooner if value is too low - need to allow for checkmate still - for efficiency
+	- possibly break sooner based on chrono - testing
+	- need to consider using double values and dividing everything by a factor of 100 or so to prevent overflow??!
 
 
 Board:
@@ -38,12 +36,6 @@ Board:
 
 */
 
-#include <cstdlib>
-#include <iostream>
-#include <queue>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 #include "RachAI.h"
 
@@ -154,10 +146,21 @@ void RachAI::Init(bool isWhite) {
 		  1,  1,  1, -2, -2,  1,  1,  1,
 		 -1, -1, -1, -1, -1, -1, -1, -1
 	};
+	
+	if (me == 'b') { // flip the tables for playing as black
+		reverse(ePosValues.begin(), ePosValues.end());
+		reverse(qPosValues.begin(), qPosValues.end());
+		reverse(bPosValues.begin(), bPosValues.end());
+		reverse(kPosValues.begin(), kPosValues.end());
+		reverse(rPosValues.begin(), rPosValues.end());
+		reverse(pPosValues.begin(), pPosValues.end());
+	}
 }
 
 // return a calculated Move to the game
 Move RachAI::GetMove(Move opMove) {
+	auto start = chrono::high_resolution_clock::now();
+
 	// convert to rMove type
 	rMove r = MovetoRMove(opMove);
 
@@ -168,68 +171,79 @@ Move RachAI::GetMove(Move opMove) {
 		pawnSpecialOff.pop();
 	}
 
-	// will ignore this queue
-	queue<rRestorePoint> q = {};
-
 	// add players move to the configuration
+	int temp = 0;
 	if (r.org != r.position)
-		executeMove(r, pieces, q, true);
+		executeMove(r, pieces, temp, true);
 
-	// find best move based on recursive depth
+	// set turn to this player
 	turn = me;
+	high = me == 'w' ? 1 : -1;
+
+	// generate the available moves, then search to requested depth
 	vector<rMove> moves;
-	moves = getAvailableMoves(pieces, moves); // the AI's available moves
+	unordered_map<int, rPiece> map = pieces; // do we need this duplicate, or could we restore it?
+	getAvailableMoves(map, moves); // the AI's available moves
 	int strength = 0;
 	int currentStrength = -5000;
-	int depth = 50; // 50 should allow for depth 2
-	unordered_map<int, rPiece> map = pieces; /////////// do we need this duplicate, or could we restore it?
+	int depth = getDepthVariable(); 
+
+	// iterates through the available moves, testing execution on pieces
 	r = moves.at(0);
-	queue<rRestorePoint> mainQ;
-	for (auto move : moves) { // iterates through the available moves, testing execution on pieces
+	int counter = 0;
+	for (auto move : moves) { 
 		strength = 0;
-		if (map.count(move.position)) // possible capture
-			strength += map.at(move.position).value * depth; // potential losses 
+		turn = me;
+		high = 1;
+
+		if (map.find(move.position) != map.end()) // possible capture
+			strength += static_cast<int16_t>(map.at(move.position).value * depth) * 1.5;
 		strength += ((getPositionValue(move.position, map.at(move.org).type)
 			- getPositionValue(move.org, map.at(move.org).type)) * high * depth);
-		executeMove(move, map, mainQ); // execute on temporary map?
+		executeMove(move, map, counter); // execute on temporary map
 
-		turn = opp; // set to non AI's turn to get the available moves
-		vector<rMove> eMoves = {};
-		strength += getMoveStrength(depth, getAvailableMoves(map, eMoves), map);
-		if (strength >= currentStrength) {// chooses move with max strength
+		strength -= getMoveStrength(depth, map); // view return moves
+
+		if (strength >= currentStrength) { // chooses move with max strength
 			currentStrength = strength;
 			r = move;
 		}
 
 		// restore map
-		while (!mainQ.empty()) {
-			mainQ.front().restore(map);
-			mainQ.pop();
+		while (counter > 0) {
+			restoreStack.top().restore(map);
+			restoreStack.pop();
+			counter--;
 		}
 	}
 
 	// convert rMove to Move
 	Move myMove = rMoveToMove(r);
-	executeMove(r, pieces, q, true);
+	executeMove(r, pieces, temp, true);
 
-	//	return Move // Move of choice or default
+	auto finish = chrono::high_resolution_clock::now();
+	chrono::duration<double> elapsed = finish - start;
+//	wxMessageBox(to_string(elapsed.count()), "Timing (s)"); // display timing to see how long move deliberation is taking
+
+	// Move of choice or default
 	return myMove;
 }
 
 // register the move on the working piece map
-void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<rRestorePoint>& qR, bool real) {
-	int shift = -2 * m.note + 5; // -1 for 2, 1 for 3
-
-	// add the piece we just moved back in
-	qR.push(rRestorePoint(map.at(m.org), m.org, true)); // readd the original
+void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, int& mods, bool real) {
+	// add the piece we just moved back
+	restoreStack.push(rRestorePoint(map.at(m.org), m.org, true)); // readd the original
+	mods++;
+	int shift;
 
 	// take move and conditions into consideration
 	switch (m.note) {
 	case 0:
-		if (map.count(m.position)) // if there's a capture
-			qR.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
+		if (map.find(m.position) != map.end()) // if there's a capture
+			restoreStack.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
 		else
-			qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new piece
+			restoreStack.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new piece
+		mods++;
 
 		map[m.position] = map.at(m.org); // replace or create
 		if (map[m.position].type == 'r' || map[m.position].type == 'e')
@@ -238,20 +252,24 @@ void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<
 			pawnSpecialOff.push(m.position);
 		break;
 	case 1:
-		qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new
+		restoreStack.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new
+		mods++;
 
 		map[m.position] = map.at(m.org);
 
-		qR.push(rRestorePoint(map.at(m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1)),
-			m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1), true)); // restore the captured
+		restoreStack.push(rRestorePoint(map.at(m.position + 8 * (map.at(m.position).color == 'w' ? 1 : -1)),
+			m.position + 8 * (map.at(m.position).color == 'w' ? 1 : -1), true)); // restore the captured
+		mods++;
 
-		map.erase(m.position + 8 * (map.at(m.position).color == 'w' ? -1 : 1)); // erase captured
+		map.erase(m.position + 8 * (map.at(m.position).color == 'w' ? 1 : -1)); // erase captured
 		break;
 	case 2:
 	case 3:
-		qR.push(rRestorePoint(map.at(m.org), (m.position), false)); // remove the new king
-		qR.push(rRestorePoint(map.at(m.position + (m.note * 3 - 8)), m.position + shift, false));
-		qR.push(rRestorePoint(map.at(m.position + (m.note * 3 - 8)), m.position + (m.note * 3 - 8), true)); // re add original rook
+		shift = 2 * m.note - 5; // -1 for 2, 1 for 3
+		restoreStack.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new rook
+		restoreStack.push(rRestorePoint(map.at(4 + (map.at(m.org).color == 'w') * 56), 4 + (map.at(m.org).color == 'w') * 56, true)); // re add original king
+		restoreStack.push(rRestorePoint(map.at(4 + (map.at(m.org).color == 'w') * 56), m.position + shift, false)); // remove the new king
+		mods += 3;
 
 		map[m.org].special = false; // end king speciality
 		map[m.position] = map[m.org];
@@ -260,15 +278,22 @@ void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<
 		map.erase(m.position + (m.note * 3 - 8));
 		break;
 	case 4:
-		if (map.count(m.position)) // if there's a capture
-			qR.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
+		if (map.find(m.position)!= map.end()) // if there's a capture
+			restoreStack.push(rRestorePoint(map.at(m.position), m.position, true)); // readd the captured
 		else
-			qR.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new queen
+			restoreStack.push(rRestorePoint(map.at(m.org), m.position, false)); // remove the new queen
+		mods++;
 
 		map[m.position] = map.at(m.org);
 		map[m.position].type = 'q';
 		map[m.position].value = RVALUES::QUEEN;
 		break;
+	}
+
+	if (real) {
+		while (!restoreStack.empty())
+			restoreStack.pop();
+		mods = 0;
 	}
 	map.erase(m.org); // erase original
 }
@@ -277,61 +302,39 @@ void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, queue<
 //////////////////////// Calculations ////////////////////////////
 
 // determine strength of particularly move based on board config/players
-int RachAI::getMoveStrength(int depth, vector<rMove>& moves, unordered_map<int, rPiece>& thisMap) {
+int RachAI::getMoveStrength(int depth, unordered_map<int, rPiece>& thisMap) {
 	int value = 0; // value of the move
-	
+	int stackCounter = 0; // count how many undos to do
 	depth /= 50; // gone a level of depth down and thus should do this iteration
-	// looking at enemy's moves
-	unordered_map<int, rPiece> enemyMap = thisMap; // working map for opponent /////// do we need this duplicate?
-	vector<rMove> mmoves; // new moves for enemy
-	vector<rMove> nmoves; // new moves?????????????????????????
-	queue<rRestorePoint> enemyQ;
-	queue<rRestorePoint> myQ;
-	for (auto move : moves) { // go through full map of moves passed down
-		if (enemyMap.count(move.position))
-			value -= enemyMap.at(move.position).value * depth; // potential losses 
-		value -= ((getPositionValue(move.position, enemyMap.at(move.org).type) 
-			- getPositionValue(move.org, enemyMap.at(move.org).type)) * high * depth);
-		executeMove(move, enemyMap, enemyQ);
 
-		turn = me; // get the AIs possible follow up moves
-		mmoves = getAvailableMoves(enemyMap, mmoves);
+	toggleTurn();
+	vector<rMove> moves;
+	getAvailableMoves(thisMap, moves);
+	for (auto move : moves) { // go through full map of moves
+		if (thisMap.find(move.position) != thisMap.end())
+			value += static_cast<int16_t>(thisMap.at(move.position).value * depth) * 1.5; // potential losses 
+		value += ((getPositionValue(move.position, thisMap.at(move.org).type) 
+			- getPositionValue(move.org, thisMap.at(move.org).type)) * high * depth);
+		executeMove(move, thisMap, stackCounter);
+		bool loss = tookKing(thisMap); // ?
 
-		if (boardTotal(enemyMap) < -100) {
-			value -= 10000 * depth;
+		while (stackCounter > 0) {
+			restoreStack.top().restore(thisMap);
+			restoreStack.pop();
+			stackCounter--;
+		}
+		if (value / (depth * 1.5) > 300) {
 			break;
 		}
 
-		// look at my next moves
-		for (auto mmove : mmoves) {
-			if (enemyMap.count(mmove.position)) // capture available
-				value += enemyMap.at(mmove.position).value * depth;
-			value += ((getPositionValue(move.position, enemyMap.at(mmove.org).type)
-				- getPositionValue(move.org, enemyMap.at(mmove.org).type)) * high * depth);
-			executeMove(mmove, enemyMap, myQ);
-
-			turn = opp; // get possible opponents moves
-			nmoves = getAvailableMoves(enemyMap, nmoves);
-
-			if (depth > 1) // iterate on next move and countermove
-				value += getMoveStrength(depth, nmoves, enemyMap);
-			
-			while (!myQ.empty()) { // restore
-				myQ.front().restore(enemyMap);
-				myQ.pop();
-			}
-		}
-		while (!enemyQ.empty()) {
-			enemyQ.front().restore(enemyMap);
-			enemyQ.pop();
-		}
+		if (depth > 1)
+			value -= getMoveStrength(depth, thisMap);
 	}
 	return value;
-
 }
 
 // gets a vector of possible moves
-vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, vector<rMove>& moves, bool castleCheck) {
+void RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, vector<rMove>& moves, bool castleCheck) {
 	moves = {};
 	for (auto p : map) {
 		if (p.second.color == turn) {
@@ -341,7 +344,7 @@ vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, 
 				// one square any way
 				for (auto x : rShifts) {
 					if (checkShift(pos, x)) {
-						if (map.count(pos + x)) { // capture available 
+						if (map.find(pos + x) != map.end()) { // capture available 
 							if (map.at(pos + x).color != turn)
 								moves.push_back(rMove{ p.first, pos + x, 0 });
 						}
@@ -366,13 +369,13 @@ vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, 
 				getShiftMoves(map, moves, pos, RSHIFT::rNW); // rNW
 				getShiftMoves(map, moves, pos, RSHIFT::rNE); // rNE
 				getShiftMoves(map, moves, pos, RSHIFT::rSE); // rSE
-				getShiftMoves(map, moves, pos, RSHIFT::rSW); // rSW
+				getShiftMoves(map, moves, pos, RSHIFT::rSW); // rSW				
 				break;
 
 			case 'k': // can jump, dual path options L
 				for (auto x : rJumps) {
 					if (checkJump(pos, x)) {
-						if (map.count(pos + x)) { // possible capture available
+						if (map.find(pos + x) != map.end()) { // possible capture available
 							if (map.at(pos + x).color != turn)
 								moves.push_back(rMove{ p.first, pos + x, 0 });
 						}
@@ -390,12 +393,12 @@ vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, 
 				
 				// castle
 				if (p.second.special && !castleCheck) { // queenside 2 or kingside 3 
-					int king = 5 + 56 * (p.second.color == 'b');
-					int note = 2 + (p.first % 8 == 0); // queenside or kingside
-					bool open = ((note == 3 && !map.count(p.first - 2) && !map.count(p.first - 1)) ||
-						(note == 2 && !map.count(p.first + 1) && !map.count(p.first + 2) && !map.count(p.first + 3)));
-					pos = king + 1 - 2 * (p.first % 8 == 1); // position piece would move to
-					if (map.count(king) && map.at(king).special && !inCastlingDanger(map, note, king) && open)
+					int king = 4 + 56 * (turn == 'w');
+					int note = 2 + (p.first % 8 == 7); // queenside or kingside
+					bool open = ((note == 3 && (map.find(p.first - 2) == map.end()) && (map.find(p.first - 1) == map.end())) ||
+						(note == 2 && map.find(p.first + 1) == map.end() && map.find(p.first + 2) == map.end() && map.find(p.first + 3) == map.end()));
+					pos = king + 1 - 2 * (p.first % 8 == 0); // position rook would move to
+					if (open && map.find(king) != map.end() && map.at(king).special && !inCastlingDanger(map, note, king))
 						moves.push_back(rMove{ p.first, pos, note });
 				}
 				break;
@@ -404,57 +407,60 @@ vector<rMove>& RachAI::getAvailableMoves(const unordered_map<int, rPiece>& map, 
 				int dir = (turn == 'w' ? -1 : 1);
 				int note = 4 * (pos + 8 * dir >= 57 || pos + 8 * dir <= 8); // promote
 				// forward
-				if (!castleCheck && !map.count(pos + 8 * dir)) {// forward 
+				if (!castleCheck && map.find(pos + 8 * dir) == map.end()) {// forward 
 					moves.push_back(rMove{ p.first, pos + 8 * dir, note });
-					if (!map.count(pos + 16 * dir) && p.second.special) // beginning of next turn, remove speciality, add to queue on execution
+					if (map.find(pos + 16 * dir) == map.end() && p.second.special) // beginning of next turn, remove speciality, add to queue on execution
 						moves.push_back(rMove{ p.first, pos + 16 * dir, note });
 				}
 
 				// forward and diagonal to capture /////////// need to cehck if pawn, not king or rook, and also precedence
-				if ((map.count(pos + 8 * dir + 1) && map.at(pos + 8 * dir + 1).color != map.at(pos).color
-					|| map.count(pos + 1) && map.at(pos + 1).special && map.at(pos + 1).color != map.at(pos).color)
-					&& checkShift(pos, 8 * dir + 1)) {// capture available
+				if ((map.find(pos + 8 * dir + 1) != map.end() && map.at(pos + 8 * dir + 1).color != map.at(pos).color
+					|| map.find(pos + 1) != map.end() && map.at(pos + 1).special && map.at(pos + 1).color != map.at(pos).color)
+					&& checkShift(pos, 8 * dir + 1)) { // capture available
 					moves.push_back(rMove{ p.first, pos + 8 * dir + 1, note });
 				}
-				if ((map.count(pos + 8 * dir - 1) && map.at(pos + 8 * dir - 1).color != map.at(pos).color  
-					|| map.count(pos - 1) && map.at(pos - 1).special && map.at(pos-1).color != map.at(pos).color)
+				if ((map.find(pos + 8 * dir - 1) != map.end() && map.at(pos + 8 * dir - 1).color != map.at(pos).color  
+					|| map.find(pos - 1) != map.end() && map.at(pos - 1).special && map.at(pos-1).color != map.at(pos).color)
 					&& checkShift(pos, 8 * dir - 1) && pos < 40 && pos >= 24) {// capture available
 					moves.push_back(rMove{ p.first, pos + 8 * dir - 1, note });
 				
 				}
 				break;
-			}
+			}	
 		}
 	}
-	return moves;
 }
 
 
 ///////////////////// HELPER Functions to check limits ////////////////////////
 
-int RachAI::boardTotal(const unordered_map<int, rPiece>& map) {
+void RachAI::toggleTurn() {
+	turn = turn == me ? opp : me;
+	high *= (turn == me ? 1 : -1);
+}
+
+bool RachAI::tookKing(const unordered_map<int, rPiece>& map) {
 	int value = 0;
 	for (auto p : map) {
-		if (p.second.color == me)
-			value += p.second.value;
-		else
-			value -= p.second.value;
+		if (p.second.color != turn && p.second.type == 'e')
+			return false;
 	}
-	return value;
+	return true;
 }
 
 // check if the path of the king is threatened
 bool RachAI::inCastlingDanger(const unordered_map<int, rPiece>& map, const int& side, const int& kingPos) {
 	// check king square and square beside king
-	turn = opp; // set turn temporarily to other player
+	toggleTurn(); // set turn temporarily to other player
 	vector<rMove> dangers;
-	dangers = getAvailableMoves(map, dangers, true); // this is an expensive choice
+	bool danger = false;
+	getAvailableMoves(map, dangers, true); // this is an expensive choice
 	for (auto d : dangers) {
 		if (d.position == kingPos || d.position == kingPos + (2 * side - 5))
-			return true;
+			danger = true;
 	}
-	turn = me; // return turn back to current player
-	return false;
+	toggleTurn(); // return turn back to current player
+	return danger;
 }
 
 int RachAI::getPositionValue(int& pos, char& piece) {
@@ -472,7 +478,6 @@ int RachAI::getPositionValue(int& pos, char& piece) {
 	case 'p':
 		return pPosValues.at(pos);
 	}
-
 }
 
 // check edges for shifts
@@ -524,7 +529,7 @@ void RachAI::getShiftMoves(const unordered_map<int, rPiece>& map, vector<rMove>&
 	int p = pos;
 	while (checkShift(pos, shift)) {
 		pos += shift;
-		if (map.count(pos)) {// capture available
+		if (map.find(pos) != map.end()) { // capture available
 			if (map.at(pos).color != turn) {
 				moves.push_back(rMove{ p, pos, 0 });
 			}
@@ -550,12 +555,19 @@ rMove RachAI::MovetoRMove(Move& opMove) {
 			special = 3;
 		else
 			special = 2;
-	else if (!pieces.count(dest) && opMove.xs != opMove.xd
+	else if (pieces.find(dest) == pieces.end() && opMove.xs != opMove.xd
 		&& pieces.at(source).type == 'p')
 		special = 1;
-	else if (pieces.at(source).type == 'p' && (dest > 56 || dest < 8))
+	else if (pieces.at(source).type == 'p' && (dest >= 56 || dest < 8))
 		special = 4;
 
 	rMove m = { source, dest, special };
 	return m;
+}
+
+int RachAI::getDepthVariable() {
+	int d = WEIGHT;
+	for (int i = 0; i < TARGET_DEPTH - 1; i++)
+		d *= d;
+	return d;
 }

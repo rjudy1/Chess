@@ -120,6 +120,17 @@ void MyFrame::OnIdle(wxIdleEvent& event) {
         board.makeMove(lastMove);
         p1Turn = !p1Turn;
         wxWindow::Refresh();
+
+        bool whiteKing = false;
+        bool blackKing = false;
+        for (int i = 0; i < 8; i++)
+            for (int j = 0; j < 8; j++)
+                if (board.getPiece(i, j) == W + K)
+                    whiteKing = true;
+                else if (board.getPiece(i, j) == B + K)
+                    blackKing = true;
+        if (!(whiteKing && blackKing))
+            wxMessageBox("Game over", "Endgame");
     }
     else if (!p1Turn && !p2IsHuman) {
         lastMove = p2.GetMove(lastMove);
