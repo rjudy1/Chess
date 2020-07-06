@@ -37,7 +37,7 @@ enum RVALUES {
 	KNIGHT = 3, //maybe 4?
 	BISHOP = 3,
 	QUEEN = 9, // maybe 8 or 10?
-	KING = 1000
+	KING = 10000
 };
 
 enum RSHIFT {
@@ -95,19 +95,18 @@ public:
 	void executeMove(const rMove& m, unordered_map<int, rPiece>&, int& mods, bool real = false);
 
 private:
-	int getMoveStrength(int, unordered_map<int, rPiece>&);
+	double getMoveStrength(double, unordered_map<int, rPiece>&);
 	void getAvailableMoves(const unordered_map<int, rPiece>&, vector<rMove>&, bool castleCheck = false);
 
 	void toggleTurn();
-	bool tookKing(const unordered_map<int, rPiece>& map);
 	bool inCastlingDanger(const unordered_map<int, rPiece>& map, const int& side, const int& kingPos);
 	bool checkShift(const int& pos, const int& shift);
 	bool checkJump(const int& pos, const int& future);
 	void getShiftMoves(const unordered_map<int, rPiece>& map, vector<rMove>& moves, int pos, const int& shift);
-	int getPositionValue(int& pos, char&);
+	long long getPositionValue(int& pos, char&);
 	Move rMoveToMove(rMove&);
 	rMove MovetoRMove(Move&);
-	int getDepthVariable();
+	double getDepthVariable();
 
 	std::unordered_map<int, rPiece> pieces; // key will be between 0 and 63 = position
 	std::queue<int> pawnSpecialOff;
@@ -116,13 +115,13 @@ private:
 	std::vector<int> rShifts = { RSHIFT::rNW, RSHIFT::rN, RSHIFT::rNE, RSHIFT::rE, RSHIFT::rSE, RSHIFT::rS, RSHIFT::rSW, RSHIFT::rW };
 	std::vector<int> rJumps = { -10, -17, -15, -6, 10, 17, 15, 6 };
 
-	int key; //saved key between functions of focus might not need?
+//	int key; //saved key between functions of focus might not need?
 	char me;
 	char opp;
 	char turn;
 	int high;
 	int TARGET_DEPTH = 4; // minimum 2
-	int WEIGHT = 40;
+	int WEIGHT = 50;
 
 	// for values of position
 	vector<int> ePosValues;
