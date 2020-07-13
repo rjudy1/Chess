@@ -25,10 +25,10 @@ using namespace std;
 #include "player.h" // to your ai class
 #include "RachAI.h"
 typedef RachAI P1;  // same here
-typedef Player P2;
+typedef RachAI P2;
 
-bool p1IsHuman = false;
-bool p2IsHuman = true;
+bool p1IsHuman = true;
+bool p2IsHuman = false;
 //----------------------------------
 
 bool p1Turn = true;

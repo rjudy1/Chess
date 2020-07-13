@@ -11,7 +11,7 @@ Notes:
 
 	- tune the piece square tables and weights
 	- still not getting through enough moves - small optimizations - particularly in getAvailableMoves - run timing check
-	- consider merging getAvailableMoves with the value calculations
+	- sacrifices wrong piece to defend the king
 
 Board:
 70 71 72 73
@@ -82,9 +82,9 @@ void RachAI::Init(bool isWhite) {
 
 	// sets values for positions
 	ePosValues = {
+		-3, -5, -4, -5, -5, -4, -5, -3,
 		-3, -4, -4, -5, -5, -4, -4, -3,
-		-3, -4, -4, -5, -5, -4, -4, -3,
-		-3, -4, -4, -5, -5, -4, -4, -3,
+		-4, -4, -4, -5, -5, -4, -4, -4,
 		-3, -4, -4, -5, -5, -4, -4, -3,
 		-2, -3, -3, -4, -4, -3, -3, -2,
 		-1, -2, -2, -2, -2, -2, -2, -2,
@@ -133,12 +133,12 @@ void RachAI::Init(bool isWhite) {
 
 	};
 	pPosValues = {
-	 	 0,  0,  0,  0,  0,  0,  0,  0,
-		10, 10, 10, 10, 10, 10, 10, 10,
+	 	12, 12, 12, 12, 12, 12, 12, 12,
+		 7,  7,  7,  7,  7,  7,  7,  7,
 		 2,  2,  4,  6,  6,  4,  2,  2,
 		 1,  1,  2,  6,  6,  2,  1,  1,
 		 0,  0,  0,  5,  5,  0,  0,  0,
-		 1, -1, -2,  0,  0, -2, -1,  1,
+		 1, -1,  1,  1,  1,  1, -1,  1,
 		 1,  2,  2, -5, -5,  2,  2,  1,
 		 0,  0,  0,  0,  0,  0,  0,  0
 	};
@@ -186,20 +186,25 @@ Move RachAI::GetMove(Move opMove) {
 	double depth = getDepthVariable(); 
 
 	// iterates through the available moves, testing execution on pieces
-	r = moves.at(0);
-	int counter = 0;
-	for (auto& move : moves) { 
+	r = moves[0];
+	int counter = 0; // for the restoreStack
+	double weight = 0; // weight the following moves based on first move
+	for (auto& move : moves) {
+		weight = 1.0;
 		strength = 0.0;
 		turn = me;
 		high = 1;
 
-		if (map.find(move.position) != map.end()) // possible capture
+		if (map.find(move.position) != map.end()) { // possible capture
 			strength += static_cast<int64_t>(map.at(move.position).value) * depth * 1.5;
+			weight += strength / (30 * depth);
+		}
 		strength += ((getPositionValue(move.position, map.at(move.org).type)
 			- getPositionValue(move.org, map.at(move.org).type)) * high * depth) + move.note * depth;
+		weight += strength / (180 * depth);
 		executeMove(move, map, counter); // execute on temporary map
-
-		strength -= getMoveStrength(depth, map); // view return moves
+		
+		strength -= getMoveStrength(depth, map) * weight; // view return moves
 
 		if (strength >= currentStrength) { // chooses move with max strength
 			currentStrength = strength;
@@ -304,20 +309,28 @@ void RachAI::executeMove(const rMove& m, unordered_map<int, rPiece>& map, int& m
 
 // determine strength of particularly move based on board config/players
 double RachAI::getMoveStrength(double depth, unordered_map<int, rPiece>& thisMap) {
-	double value = 0; // value of the move
+	double value = 0; // value of the move vector
+	double strength = 0; // value of this specific move
 	int stackCounter = 0; // count how many undos to do
 	depth /= WEIGHT; // gone a level of depth down and thus should do this iteration
+	double moveWeight = 0;
 
 	toggleTurn();
 	vector<rMove> moves;
 	moves.reserve(50);
 	getAvailableMoves(thisMap, moves);
 	for (auto& move : moves) { // go through full map of moves
-		if (thisMap.find(move.position) != thisMap.end())
-			value += static_cast<int64_t>(thisMap.at(move.position).value) * depth * 1.5; // potential losses 
-		value += ((getPositionValue(move.position, thisMap.at(move.org).type)
+		moveWeight = 1;
+		strength = 0;
+		if (thisMap.find(move.position) != thisMap.end()) {
+			strength += static_cast<int64_t>(thisMap.at(move.position).value) * depth * 1.5;  // potential losses 
+			moveWeight += strength / depth / 29;
+		}
+		strength += ((getPositionValue(move.position, thisMap.at(move.org).type)
 			- getPositionValue(move.org, thisMap.at(move.org).type))) * high * depth + move.note *depth;
 
+		moveWeight += (strength / depth) / 175;
+		value += strength;
 		executeMove(move, thisMap, stackCounter);
 
 		while (stackCounter > 0) {
@@ -326,7 +339,7 @@ double RachAI::getMoveStrength(double depth, unordered_map<int, rPiece>& thisMap
 			stackCounter--;
 		}
 		if (value / (depth * 1.5) > 75) { // king loss?
-			value += (double)WEIGHT * (double)WEIGHT * depth * ((int)(turn == opp) + 1);
+			value += (double)WEIGHT / 15 * depth * ((int)(turn == opp) + 1);
 			break;
 		}
 		if (value / depth > 20 && turn == opp)
@@ -336,7 +349,7 @@ double RachAI::getMoveStrength(double depth, unordered_map<int, rPiece>& thisMap
 		}
 
 		if (depth > 4e-4)
-			value -= getMoveStrength(depth, thisMap);
+			value -= getMoveStrength(depth, thisMap) * moveWeight;
 		else if (TARGET_DEPTH % 2 == 1)
 			toggleTurn();
 	}

@@ -33,11 +33,11 @@ using namespace std;
 //------------- Structures for the AI ----------------//
 enum RVALUES {
 	PAWN = 1,
-	ROOK = 5,
-	KNIGHT = 3, //maybe 4?
-	BISHOP = 3,
-	QUEEN = 9, // maybe 8 or 10?
-	KING = 10000
+	ROOK = 6,
+	KNIGHT = 4, //maybe 4?
+	BISHOP = 4,
+	QUEEN = 10, // maybe 8 or 10?
+	KING = 1000000
 };
 
 enum RSHIFT {
