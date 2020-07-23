@@ -342,7 +342,7 @@ double RachAI::getMoveStrength(double depth, unordered_map<int, rPiece>& thisMap
 			value += (double)WEIGHT / 15 * depth * ((int)(turn == opp) + 1);
 			break;
 		}
-		if (value / depth > 20 && turn == opp)
+		if (value / depth > 20 && turn == opp) //prune search tree?
 		{
 			value += 500 * depth;
 			break;
